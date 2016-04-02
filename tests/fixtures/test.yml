@@ -1,0 +1,33 @@
+simple: simple-value
+simple-with-spaces   : simple-with-space-value
+list:
+    - Element
+    - Element with spaces
+array-list: [array-element, Array element with spaces]
+associative-array: {key1: key1-value, key2: key2-value with space}
+parent:
+    child: child-value
+    child-with-spaces  : child-with-spaces-value
+    parent-child:
+        child-child: child-child-value
+newline: |
+    Newline
+    Text with lines
+newline-folded: >
+    Newline folded
+    Text with lines
+product:
+    - sku         : BL394D
+      quantity    : 4
+      description : Basketball
+      price       : 450.00
+    - sku         : BL4438H
+      quantity    : 1
+      description : Super Hoop
+      price       : 2392.00
+tax  : 251.42
+total: 4443.52
+comments:
+    Late afternoon is best.
+    Backup contact is Nancy
+    Billsmer @ 338-4338.
