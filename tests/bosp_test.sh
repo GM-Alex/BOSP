@@ -8,10 +8,25 @@ function check_yaml_parser() {
   local parsed_yaml
   bosp::yaml::parse "./fixtures/test.yml" "parsed_yaml"
 
+  local root_children=( $(bosp::get_children "parsed_yaml") )
+  assertion__array_contains "simple" "${root_children[@]}"
+  assertion__array_contains "simple-with-spaces" "${root_children[@]}"
+  assertion__array_contains "list" "${root_children[@]}"
+  assertion__array_contains "array-list" "${root_children[@]}"
+  assertion__array_contains "associative-array" "${root_children[@]}"
+  assertion__array_contains "parent" "${root_children[@]}"
+  assertion__array_contains "newline" "${root_children[@]}"
+  assertion__array_contains "newline-folded" "${root_children[@]}"
+  assertion__array_contains "comment" "${root_children[@]}"
+  assertion__array_contains "product" "${root_children[@]}"
+
   assertion__equal "simple-value" "${parsed_yaml["simple"]}"
   assertion__equal "simple-with-space-value" "${parsed_yaml["simple-with-spaces"]}"
-  assertion__equal "Newline\nText with lines" "${parsed_yaml["newline"]}"
+
+  new_line_test_value=$'Newline\nText with lines'
+  assertion__equal "${new_line_test_value}" "${parsed_yaml["newline"]}"
   assertion__equal "Newline folded Text with lines" "${parsed_yaml["newline-folded"]}"
+  assertion__equal "Comment. Comment line which goes on." "${parsed_yaml["comment"]}"
 
   local parent_children=( $(bosp::get_children "parsed_yaml" "parent") )
 

@@ -3,8 +3,8 @@ simple-with-spaces   : simple-with-space-value
 list:
     - Element
     - Element with spaces
-array-list: [array-element, Array element with spaces]
-associative-array: {key1: key1-value, key2: key2-value with space}
+array-list: [array-element, Array element with spaces, one more]
+associative-array: {key1: key1-value, key2: key2-value with space, key3: wohooo}
 parent:
     child: child-value
     child-with-spaces  : child-with-spaces-value
@@ -16,6 +16,10 @@ newline: |
 newline-folded: >
     Newline folded
     Text with lines
+comment:
+    Comment.
+    Comment line which
+    goes on.
 product:
     - sku         : BL394D
       quantity    : 4
@@ -25,9 +29,4 @@ product:
       quantity    : 1
       description : Super Hoop
       price       : 2392.00
-tax  : 251.42
-total: 4443.52
-comments:
-    Late afternoon is best.
-    Backup contact is Nancy
-    Billsmer @ 338-4338.
+

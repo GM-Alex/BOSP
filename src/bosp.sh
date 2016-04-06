@@ -1,37 +1,29 @@
 #!/usr/bin/env bash
 
-__BOSP_YAML_CURRENT_PATH=()
-__BOSP_YAML_CURRENT_LEVEL=0
-__BOSP_YAML_CURRENT_LINE=''
-__BOSP_YAML_CURRENT_KEY=''
-__BOSP_YAML_LAST_KEY=''
-__BOSP_YAML_CURRENT_VALUE=''
-declare -g __BOSP_YAML_SPACES=()
-
-declare -i __BOSP_YAML_NO_OF_SPACES=0
-declare -i __BOSP_YAML_LAST_NO_OF_SPACES
-
+declare __BOSP_YAML_CURRENT_PATH=()
+declare __BOSP_YAML_CURRENT_LINE
+declare __BOSP_YAML_CURRENT_VALUE
+declare __BOSP_YAML_CURRENT_VALUE_LINES=()
+declare __BOSP_YAML_SPACES=()
+declare -i __BOSP_YAML_CURRENT_LEVEL=0
 declare -A __BOSP_YAML_ARRAY=()
-__CAKE='aaa'
 
 bosp::join() {
-  local IFS="$1"
+  local IFS="${1}"
   shift
-  echo "$*"
+  echo "${*}"
 }
 
 
 bosp::yaml::init_values() {
+  unset __BOSP_YAML_CURRENT_LINE
+  unset __BOSP_YAML_CURRENT_VALUE
+
   __BOSP_YAML_CURRENT_PATH=()
-  __BOSP_YAML_CURRENT_LINE=''
-  __BOSP_YAML_CURRENT_KEY=''
-  __BOSP_YAML_LAST_KEY=''
-  __BOSP_YAML_CURRENT_VALUE=''
   __BOSP_YAML_ARRAY=()
 }
 
 bosp::yaml::process_spaces() {
-
   local no_spaces=${1}
   local last_no_spaces=0
 
@@ -44,10 +36,8 @@ bosp::yaml::process_spaces() {
   elif [[ ${last_no_spaces} -gt ${no_spaces} ]]; then  # higher level so go back until the level matches
     diff=$(( last_no_spaces - no_spaces ))
 
-    local cur_step
-
     while [[ diff -gt 0 ]]; do
-      cur_step=${__BOSP_YAML_SPACES[${#__BOSP_YAML_SPACES[@]}-1]}
+      local cur_step=${__BOSP_YAML_SPACES[${#__BOSP_YAML_SPACES[@]}-1]}
       unset __BOSP_YAML_SPACES[${#__BOSP_YAML_SPACES[@]}-1]
       let diff-=${cur_step}
     done
@@ -57,56 +47,117 @@ bosp::yaml::process_spaces() {
 }
 
 bosp::yaml::process_key() {
-  local diff
+  local path_length=${#__BOSP_YAML_CURRENT_PATH[@]}
+  local go_back=$(( path_length - __BOSP_YAML_CURRENT_LEVEL ))
 
-  local no_spaces=${1}
-  local last_no_spaces=0
-
-  for i in "${__BOSP_YAML_SPACES[@]}"; do
-    let last_no_spaces+=${i}
-  done
-
-  local go_back=1 # same level as before so go one step back on the path
-
-  if [[ ${last_no_spaces} -lt ${no_spaces} ]]; then # next level so add the new spaces
-    go_back=0
-    __BOSP_YAML_SPACES+=( $((no_spaces - last_no_spaces)) )
-  elif [[ ${last_no_spaces} -gt ${no_spaces} ]]; then  # higher level so go back until the level matches
-    diff=$(( last_no_spaces - no_spaces ))
-
-    local cur_step
-
-    while [[ diff -gt 0 ]]; do
-      cur_step=${__BOSP_YAML_SPACES[${#__BOSP_YAML_SPACES[@]}-1]}
-      unset __BOSP_YAML_SPACES[${#__BOSP_YAML_SPACES[@]}-1]
-      let diff-=${cur_step}
-      let go_back+=1
-    done
-  fi
-
-  while [[ ${go_back} -gt 0 ]] && [[ ${#__BOSP_YAML_CURRENT_PATH} -gt 0 ]]; do
+  while [[ ${go_back} -gt 0 ]] && [[ ${#__BOSP_YAML_CURRENT_PATH[@]} -gt 0 ]]; do
     unset __BOSP_YAML_CURRENT_PATH[${#__BOSP_YAML_CURRENT_PATH[@]}-1]
-    go_back=$((go_back - 1))
+    let go_back-=1
   done
 
-  local key=${2}
+  local key=${1}
 
   __BOSP_YAML_CURRENT_PATH+=( ${key} )
-  __BOSP_YAML_FULL_KEY=$(bosp::join ':' "${__BOSP_YAML_CURRENT_PATH[@]}")
+  __BOSP_YAML_FULL_KEY=$(bosp::join ":" "${__BOSP_YAML_CURRENT_PATH[@]}")
+}
+
+bosp::yaml::process_value_lines() {
+  __BOSP_YAML_CURRENT_VALUE_LINES=()
+
+  while read -r __BOSP_YAML_CURRENT_LINE &&
+        [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^([\ ]*)([^:]*)$ ]]
+  do
+    __BOSP_YAML_CURRENT_VALUE_LINES+=( "${BASH_REMATCH[2]}" )
+  done
+}
+
+bosp::yaml::add_array_list() {
+  let __BOSP_YAML_CURRENT_LEVEL+=1
+  local line=0
+
+  for value_line in "${__BOSP_YAML_CURRENT_VALUE_LINES[@]}"; do
+    bosp::yaml::process_key "[${line}]"
+
+    if [[ ${value_line} =~ ^([\ ]*)(.*)$ ]]; then
+      __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${BASH_REMATCH[2]}"
+    fi
+
+    let line+=1
+  done
+
+  let __BOSP_YAML_CURRENT_LEVEL-=1
+  unset __BOSP_YAML_FULL_KEY
 }
 
 bosp::yaml::process_value() {
   local value=${1}
 
+  __BOSP_YAML_CURRENT_VALUE=''
+
   case ${value} in
-    '|')
-      __BOSP_YAML_CURRENT_VALUE=''
+    '|'|'>')
+      bosp::yaml::process_value_lines
+
+      local divider=$'\n'
+
+      if [[ "${value}" == ">" ]]; then
+        divider=" "
+      fi
+
+      __BOSP_YAML_CURRENT_VALUE=$(bosp::join "${divider}" "${__BOSP_YAML_CURRENT_VALUE_LINES[@]}")
       ;;
-    '>')
-      __BOSP_YAML_CURRENT_VALUE=''
+    '')
+      bosp::yaml::process_value_lines
+
+      local value_lines=${#__BOSP_YAML_CURRENT_VALUE_LINES[@]}
+
+      if [[ ${value_lines} == 0 ]]; then
+        unset __BOSP_YAML_FULL_KEY
+      elsechecking
+        local array_list_regex='^-\ (.*)$'
+
+        if [[ ${__BOSP_YAML_CURRENT_VALUE_LINES[0]} =~ ${array_list_regex} ]]; then
+          local value_line
+          local temp_value_lines=()
+
+          for value_line in "${__BOSP_YAML_CURRENT_VALUE_LINES[@]}"; do
+            if [[ ${value_line} =~ ${array_list_regex} ]]; then
+              temp_value_lines+=( "${BASH_REMATCH[1]}" )
+            else
+              echo "invalid yaml file"
+              exit 1
+            fi
+          done
+
+          __BOSP_YAML_CURRENT_VALUE_LINES=( "${temp_value_lines[@]}" )
+          bosp::yaml::add_array_list
+        else
+          __BOSP_YAML_CURRENT_VALUE=$(bosp::join " " "${__BOSP_YAML_CURRENT_VALUE_LINES[@]}")
+        fi
+      fi
       ;;
     *)
-      __BOSP_YAML_CURRENT_VALUE=${value}
+      if [[ ${value} =~ ^\{.*\}$ ]]; then
+        echo "aa"
+      elif [[ ${value} =~ ^\[((.*),?)*\]$ ]]; then
+        local current_ifs=${IFS}
+        IFS=','
+
+        local list
+        read -ra list <<< "${BASH_REMATCH[1]}"
+
+        local list_item
+        __BOSP_YAML_CURRENT_VALUE_LINES=()
+
+        for list_item in "${list[@]}"; do
+          __BOSP_YAML_CURRENT_VALUE_LINES+=( "${list_item}" )
+        done
+
+        IFS=${current_ifs}
+        bosp::yaml::add_array_list
+      else
+        __BOSP_YAML_CURRENT_VALUE=${value}
+      fi
       ;;
   esac
 }
@@ -131,18 +182,30 @@ bosp::yaml::parse() {
 
   IFS=''
 
-  while read -r __BOSP_YAML_CURRENT_LINE; do
-    if [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^([\ ]*)([^:]*):[\ ]*(.*)$ ]]; then
-      #bosp::yaml::process_spaces
-      #bosp::yaml::process_key ${#BASH_REMATCH[1]} ${BASH_REMATCH[2]%% *}
-      bosp::yaml::process_value ${BASH_REMATCH[3]%% *}
+  while [[ -n ${__BOSP_YAML_CURRENT_LINE+1} ]] || read -r __BOSP_YAML_CURRENT_LINE; do
+    local current_line=${__BOSP_YAML_CURRENT_LINE}
 
-      echo "K: ${BASH_REMATCH[2]%% *}"
-      bosp::yaml::process_spaces ${#BASH_REMATCH[1]}
-      echo ${__BOSP_YAML_CURRENT_LEVEL}
-      #echo "${__BOSP_YAML_FULL_KEY} | ${__BOSP_YAML_CURRENT_VALUE}"
+    if [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^([\ ]*)(.*)$ ]]; then
+      local spaces="${BASH_REMATCH[1]}"
+      local content="${BASH_REMATCH[2]}"
 
-      #__BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${__BOSP_YAML_CURRENT_VALUE}"
+      bosp::yaml::process_spaces ${#spaces}
+
+      if [[ ${content} =~ ^([^:]*):[\ ]*(.*)$ ]]; then
+        bosp::yaml::process_key "${BASH_REMATCH[1]%% *}"
+        content=${BASH_REMATCH[2]}
+      fi
+
+      bosp::yaml::process_value "${content}"
+
+      if [[ -n ${__BOSP_YAML_FULL_KEY+1} ]]; then
+        #echo "${__BOSP_YAML_FULL_KEY} | ${__BOSP_YAML_CURRENT_VALUE}"
+        __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${__BOSP_YAML_CURRENT_VALUE}"
+      fi
+
+      if [[ "${current_line}" == "${__BOSP_YAML_CURRENT_LINE}" ]]; then
+        unset __BOSP_YAML_CURRENT_LINE
+      fi
     fi
   done < ${file}
 
@@ -151,10 +214,8 @@ bosp::yaml::parse() {
   local declare_array="declare -g -A ${destination_array}=()"
   eval "${declare_array}"
 
-  local command
-
   for key in "${!__BOSP_YAML_ARRAY[@]}"; do
-    command="${destination_array}[\${key}]=\${__BOSP_YAML_ARRAY[\${key}]}"
+    local command="${destination_array}[\${key}]=\${__BOSP_YAML_ARRAY[\${key}]}"
     eval "${command}"
   done
 }
@@ -193,7 +254,7 @@ bosp::get_children() {
     parent_key="${2}:"
   fi
 
-  local regex="^${parent_key}([^:]*)$"
+  local regex="^${parent_key}([^:]*)"
   local keys=()
 
   for key in "${!__BOSP_YAML_ARRAY[@]}"; do
