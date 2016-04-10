@@ -4,7 +4,14 @@ list:
     - Element
     - Element with spaces
 array-list: [array-element, Array element with spaces, one more]
-associative-array: {key1: key1-value, key2: key2-value with space, key3: wohooo}
+array-list-multi-line: [
+  array-element-multi-line,
+  Array multi line element with spaces,
+  one more two  ]
+associative-array: {key1: key1-value, key2: key2-value with space}
+associative-array-multi-line: {
+    key-multi-line-1: key-multi-line-1-value,
+    key-multi-line-2: key-multi-line-2-value with space  }
 parent:
     child: child-value
     child-with-spaces  : child-with-spaces-value
