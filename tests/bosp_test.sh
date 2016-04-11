@@ -15,11 +15,14 @@ function yaml::parser::root_children() {
   assertion__array_contains "list" "${root_children[@]}"
   assertion__array_contains "array-list" "${root_children[@]}"
   assertion__array_contains "associative-array" "${root_children[@]}"
+  assertion__array_contains "associative-array-nested" "${root_children[@]}"
   assertion__array_contains "parent" "${root_children[@]}"
   assertion__array_contains "newline" "${root_children[@]}"
   assertion__array_contains "newline-folded" "${root_children[@]}"
   assertion__array_contains "comment" "${root_children[@]}"
-  assertion__array_contains "product" "${root_children[@]}"
+  assertion__array_contains "object-list" "${root_children[@]}"
+
+  assertion__equal 13 "${#root_children[@]}"
 }
 
 function yaml::parser::simple-value() {
@@ -105,4 +108,8 @@ function yaml::parser::associative-array-multi-line() {
 
   assertion__equal "key-multi-line-1-value" "${parsed_yaml["associative-array-multi-line:key-multi-line-1"]}"
   assertion__equal "key-multi-line-2-value with space" "${parsed_yaml["associative-array-multi-line:key-multi-line-2"]}"
+}
+
+function yaml::write() {
+  bosp::yaml::write "parsed_yaml"
 }

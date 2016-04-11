@@ -10,10 +10,49 @@
 # Returns:
 #   string
 ########################################
-bosp::join() {
+bosp::__join() {
   local IFS="${1}"
   shift
   echo "${*}"
+}
+
+##############################################
+# Checks if the given element is in the array
+# Globals:
+#  None
+# Arguments:
+#   string element we are looking for
+#   array  list we are looking for the element
+# Returns:
+#   bool
+##############################################
+bosp::__array_contains() {
+  local element
+
+  for element in "${@:2}"; do
+    if [[ "$element" == "$1" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+###########################
+# Repeats the given string
+# Globals:
+#  None
+# Arguments:
+#   string string to repeat
+#   int    times to repeat
+# Returns:
+#   None
+###########################
+bosp::__string_repeat() {
+  if [[ ${2} -gt 0 ]]; then
+    eval="echo {1.."$(($2))"}"
+    printf "${1}%.0s" $(eval ${eval})
+  fi
 }
 
 # Default YAML variables
@@ -38,7 +77,7 @@ declare -A __BOSP_YAML_ARRAY=()
 # Returns:
 #   None
 #########################################
-bosp::yaml::init_values() {
+bosp::yaml::__init_values() {
   unset __BOSP_YAML_CURRENT_LINE
   __BOSP_YAML_CURRENT_PATH=()
   unset __BOSP_YAML_CURRENT_VALUE
@@ -56,7 +95,7 @@ bosp::yaml::init_values() {
 # Returns:
 #   None
 #######################################################
-bosp::yaml::process_spaces() {
+bosp::yaml::__process_spaces() {
   local no_spaces=${1}
   local last_no_spaces=0
 
@@ -90,7 +129,7 @@ bosp::yaml::process_spaces() {
 # Returns:
 #   None
 #############################################
-bosp::yaml::process_key() {
+bosp::yaml::__process_key() {
   local path_length=${#__BOSP_YAML_CURRENT_PATH[@]}
   local go_back=$(( path_length - __BOSP_YAML_CURRENT_LEVEL ))
 
@@ -102,7 +141,7 @@ bosp::yaml::process_key() {
   local key=${1}
 
   __BOSP_YAML_CURRENT_PATH+=( ${key} )
-  __BOSP_YAML_FULL_KEY=$(bosp::join ":" "${__BOSP_YAML_CURRENT_PATH[@]}")
+  __BOSP_YAML_FULL_KEY=$(bosp::__join ":" "${__BOSP_YAML_CURRENT_PATH[@]}")
 }
 
 #############################################
@@ -115,25 +154,72 @@ bosp::yaml::process_key() {
 # Returns:
 #   None
 #############################################
-bosp::yaml::add_list_values() {
-  declare -n list_values=${1}
+bosp::yaml::__add_list_values() {
+  if [[ ${1} =~ ^([\[\{])(.*)([\]\}]),?$ ]]; then
+    local current_ifs=${IFS}
+    IFS=','
+    declare list_values=()
+    read -ra list_values <<< "${BASH_REMATCH[2]}"
+    IFS=${current_ifs}
+  else
+    echo "List declaration parsing issue in '${1}' invalid yaml file"
+    exit 1
+  fi
 
   let __BOSP_YAML_CURRENT_LEVEL+=1
-  local list_value
+  local raw_list_value
   local line=0
+  local open_braces=0
+  local collect_lines=()
 
-  for list_value in "${list_values[@]}"; do
-    if [[ ${list_value} =~ ^([\ ]*)(.*)([\ ]*)$ ]]; then
-      list_value=${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}
+  for raw_list_value in "${list_values[@]}"; do
+    if [[ ${raw_list_value} =~ ^([\ ]*)(.*)([\ ]*)$ ]]; then
+      local list_value=${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}
+      local key="[${line}]"
 
-      if [[ ${list_value} =~ ^(.*):([\ ]*)(.*)$ ]]; then
-        bosp::yaml::process_key "${BASH_REMATCH[1]}"
-        list_value="${BASH_REMATCH[3]}"
-      else
-        bosp::yaml::process_key "[${line}]"
+      if [[ ${list_value} =~ ^([^:]*):[\ ]*(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        list_value="${BASH_REMATCH[2]}"
       fi
 
-      __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${list_value}"
+      if [[ ${open_braces} == 0 ]]; then
+        bosp::yaml::__process_key "${key}"
+      fi
+
+      if [[ ${list_value} =~ ^[\ ]*[\{]+[^\}]*$ ]]; then
+        local braces="${list_value//[^\{]}"
+        echo "${list_value} | ${braces} | ${#braces}"
+        let open_braces+=${#braces}
+        collect_lines+=( "${raw_list_value}" )
+      elif [[ ${list_value} =~ ^[^\{]*[\}]+[\ ]*$ ]]; then
+        local braces="${list_value//[^\}]}"
+        echo "${list_value} | ${braces} | ${#braces}"
+        let open_braces-=${#braces}
+        collect_lines+=( "${raw_list_value}" )
+      elif [[ ${open_braces} != 0 ]]; then
+        collect_lines+=( "${raw_list_value}" )
+      fi
+
+      echo ${open_braces}
+
+      if [[ ${open_braces} == 0 ]]; then
+        if [[ ${#collect_lines[@]} > 0 ]]; then
+          local collapsed_lines=$(bosp::__join "," "${collect_lines[@]}")
+          echo ${collapsed_lines}
+
+          if [[ ${collapsed_lines} =~ ^([^:]*):[\ ]*(.*)$ ]]; then
+            list_value="${BASH_REMATCH[2]}"
+          fi
+
+          collect_lines=()
+        fi
+
+        if [[ ${list_value} =~ ^([\[\{])(.*)([\]\}])$ ]]; then
+          bosp::yaml::__add_list_values "${list_value}"
+        else
+          __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${list_value}"
+        fi
+      fi
     fi
 
     let line+=1
@@ -154,7 +240,7 @@ bosp::yaml::add_list_values() {
 # Returns:
 #   None
 ##############################
-bosp::yaml::process_value() {
+bosp::yaml::__process_value() {
   local value=${1}
   local value_lines=()
 
@@ -178,7 +264,7 @@ bosp::yaml::process_value() {
   do
     local clean_line="${__BOSP_YAML_CURRENT_LINE#"${__BOSP_YAML_CURRENT_LINE%%[![:space:]]*}"}"
 
-    if [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^.*\}.*$ ]]; then
+    if [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^.*\}[^,]*$ ]]; then
       is_assoc_array=0
     elif [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^.*\{.*$ ]]; then
       is_assoc_array=1
@@ -201,42 +287,31 @@ bosp::yaml::process_value() {
         fi
 
         value_lines=("${value_lines[@]:1}") #remove first line
-        __BOSP_YAML_CURRENT_VALUE=$(bosp::join "${divider}" "${value_lines[@]}")
+        __BOSP_YAML_CURRENT_VALUE=$(bosp::__join "${divider}" "${value_lines[@]}")
         ;;
       *)
         local array_list_regex='^-\ (.*)$'
 
         if [[ ${first_line} =~ ${array_list_regex} ]]; then
           local value_line
-          declare __BOSP_LIST_VALUES=()
+          local list=()
 
           for value_line in "${value_lines[@]}"; do
             if [[ ${value_line} =~ ${array_list_regex} ]]; then
-              __BOSP_LIST_VALUES+=( "${BASH_REMATCH[1]}" )
+              list+=( "${BASH_REMATCH[1]}" )
             else
-              echo "Array list parsing issue, invalid yaml file"
+              echo "Array list parsing issue at '${value_line}', invalid yaml file"
               exit 1
             fi
           done
 
-          bosp::yaml::add_list_values "__BOSP_LIST_VALUES"
+          local collapsed_lines="[ $(bosp::__join "," "${list[@]}") ]"
+          bosp::yaml::__add_list_values "${collapsed_lines[@]}"
         elif [[ ${first_line} =~ ^([\[\{])(.*)$ ]]; then
-          local collapsed_lines=$(bosp::join " " "${value_lines[@]}")
-
-          if [[ ${collapsed_lines} =~ ^([\[\{])(.*)([\]\}])$ ]]; then
-            local current_ifs=${IFS}
-            IFS=','
-            declare __BOSP_LIST_VALUES=()
-            read -ra __BOSP_LIST_VALUES <<< "${BASH_REMATCH[2]}"
-            IFS=${current_ifs}
-
-            bosp::yaml::add_list_values "__BOSP_LIST_VALUES"
-          else
-            echo "Array declaration parsing issue, invalid yaml file"
-            exit 1
-          fi
+          local collapsed_lines=$(bosp::__join " " "${value_lines[@]}")
+          bosp::yaml::__add_list_values "${collapsed_lines[@]}"
         else
-          __BOSP_YAML_CURRENT_VALUE=$(bosp::join " " "${value_lines[@]}")
+          __BOSP_YAML_CURRENT_VALUE=$(bosp::__join " " "${value_lines[@]}")
         fi
       ;;
     esac
@@ -254,7 +329,7 @@ bosp::yaml::process_value() {
 #   None
 ##############################################################
 bosp::yaml::parse() {
-  bosp::yaml::init_values
+  bosp::yaml::__init_values
 
   #TODO file with missing empty line as last line makes trouble
   local file=${1}
@@ -269,14 +344,14 @@ bosp::yaml::parse() {
     if [[ ${__BOSP_YAML_CURRENT_LINE} =~ ^([\ ]*)(.*)$ ]]; then
       local content="${BASH_REMATCH[2]}"
 
-      bosp::yaml::process_spaces ${#BASH_REMATCH[1]}
+      bosp::yaml::__process_spaces ${#BASH_REMATCH[1]}
 
       if [[ ${content} =~ ^([^:]*):[\ ]*(.*)$ ]]; then
-        bosp::yaml::process_key "${BASH_REMATCH[1]%"${BASH_REMATCH[1]##*[![:space:]]}"}"
+        bosp::yaml::__process_key "${BASH_REMATCH[1]%"${BASH_REMATCH[1]##*[![:space:]]}"}"
         content=${BASH_REMATCH[2]}
       fi
 
-      bosp::yaml::process_value "${content}"
+      bosp::yaml::__process_value "${content}"
 
       if [[ -n ${__BOSP_YAML_FULL_KEY+1} ]]; then
         __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${__BOSP_YAML_CURRENT_VALUE}"
@@ -299,6 +374,60 @@ bosp::yaml::parse() {
   done
 }
 
+bosp::yaml::write() {
+  declare -n yaml=${1}
+
+  local indent=2
+
+  if [[ -n ${2+1} ]]; then
+    indent=${2}
+  fi
+
+  local parent_key=''
+
+  if [[ -n ${3+1} ]]; then
+    local children=( $(bosp::get_children "${1}" "${3}") )
+    parent_key="${3}:"
+  else
+    local children=( $(bosp::get_children "${1}") )
+  fi
+
+  local child
+
+  for child in "${children[@]}"; do
+    local full_key="${parent_key}${child}"
+    local level_string="${full_key//[^:]}"
+    local level=${#level_string}
+    local value="${yaml[${full_key}]}"
+
+    let level*=${indent}
+    spaces=$(bosp::__string_repeat ' ' ${level})
+    local line
+
+    if [[ ${child} =~ ^\[[0-9]+\]$ ]]; then
+      line="${spaces}- ${value}"
+    else
+      if [[ ${value} == *$'\n'* ]]; then
+        value=$'|\n'${value}
+        search=$'\n'
+
+        let level+=${indent}
+        next_spaces=$(bosp::__string_repeat ' ' ${level})
+        replace=$'\n'${next_spaces}
+
+        value=${value//${search}/${replace}}
+      fi
+
+      line="${spaces}${child}: ${value}"
+    fi
+
+    #echo "${line}"
+    bosp::yaml::write "${1}" "${indent}" "${full_key}"
+  done
+}
+
+
+
 ###################################################################
 # Gets the children keys for the given parsed array and parent key
 # Globals:
@@ -313,18 +442,15 @@ bosp::get_children() {
   declare -A __BOSP_YAML_ARRAY=()
   local __BOSP_YAML_ARRAY
 
-  local source_array=${1}
-  local key
+  declare -A source_array=(); unset source_array #Hack for ide
 
-  local source_array_keys
-  local source_array_keys_command="source_array_keys=( \"\${!${source_array}[@]}\" )"
-  eval "${source_array_keys_command}"
+  declare -n source_array=${1}
+  local key
 
   local command
 
-  for key in "${source_array_keys[@]}"; do
-    command="__BOSP_YAML_ARRAY[\${key}]=\${${source_array}[\${key}]}"
-    eval "${command}"
+  for key in "${!source_array[@]}"; do
+    __BOSP_YAML_ARRAY[${key}]=${source_array[${key}]}
   done
 
   local parent_key=""
@@ -338,7 +464,9 @@ bosp::get_children() {
 
   for key in "${!__BOSP_YAML_ARRAY[@]}"; do
     if [[ ${key} =~ ${regex} ]]; then
-      keys+=( "${BASH_REMATCH[1]}" )
+      if ! (bosp::__array_contains "${BASH_REMATCH[1]}"  "${keys[@]}"); then
+        keys+=( "${BASH_REMATCH[1]}" )
+      fi
     fi
   done
 
