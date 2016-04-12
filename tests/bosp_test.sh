@@ -111,5 +111,5 @@ function yaml::parser::associative-array-multi-line() {
 }
 
 function yaml::write() {
-  bosp::yaml::write "parsed_yaml"
+  bosp::yaml::write "./tmp/out.yml" "parsed_yaml"
 }

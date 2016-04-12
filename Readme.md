@@ -5,5 +5,6 @@ Simple parser for bashop with simple implementation for YAML
 ## TODO
 
 * Extend YAML
-    * Add nested normal and assoc array declaration
+    * Add nested array declaration
+    * Add array objects
 * Implement JSON

@@ -155,25 +155,56 @@ bosp::yaml::__process_key() {
 #   None
 #############################################
 bosp::yaml::__add_list_values() {
+  local list_values=()
+
   if [[ ${1} =~ ^([\[\{])(.*)([\]\}]),?$ ]]; then
-    local current_ifs=${IFS}
-    IFS=','
-    declare list_values=()
-    read -ra list_values <<< "${BASH_REMATCH[2]}"
-    IFS=${current_ifs}
+    local braces=0
+    local add_line=''
+    local full_lines="${BASH_REMATCH[2]}"
+
+    while [[ ${full_lines} != '' ]]; do
+      if [[ ${full_lines} =~ ^(.*),[\ ]*([^:]*:[\ ]+[\{\[].*)$ ]]; then
+        if [[ ${add_line} == '' ]]; then
+          add_line="${BASH_REMATCH[2]}"
+        else
+          add_line="${BASH_REMATCH[2]}, ${add_line}"
+        fi
+
+        full_lines="${BASH_REMATCH[1]}"
+
+        local open_braces="${add_line//[^\{]}"
+        local no_open_braces=${#open_braces}
+        local close_braces="${add_line//[^\}]}"
+        local no_close_braces=${#close_braces}
+
+        if [[ $(( no_open_braces - no_close_braces )) == 0 ]]; then
+          if [[ ${add_line} =~ ^(.*)(,[^\}]*)$ ]]; then
+            add_line=${BASH_REMATCH[1]}
+            full_lines+=${BASH_REMATCH[2]}
+          fi
+
+          list_values+=( "${add_line}" )
+          add_line=''
+        fi
+      elif [[ ${full_lines} =~ ^(.*),[\ ]*(.*)$ ]]; then
+        list_values+=( "${BASH_REMATCH[2]}" )
+        full_lines="${BASH_REMATCH[1]}"
+      else
+        list_values+=( "${full_lines}" )
+        full_lines=''
+      fi
+    done
   else
     echo "List declaration parsing issue in '${1}' invalid yaml file"
     exit 1
   fi
 
   let __BOSP_YAML_CURRENT_LEVEL+=1
-  local raw_list_value
+  local index
   local line=0
-  local open_braces=0
-  local collect_lines=()
 
-  for raw_list_value in "${list_values[@]}"; do
-    if [[ ${raw_list_value} =~ ^([\ ]*)(.*)([\ ]*)$ ]]; then
+  for (( index=${#list_values[@]}-1 ; index >= 0 ; index-- )) ; do #Reverse index order
+    if [[ "${list_values[${index}]}" =~ ^([\ ]*)(.*)([\ ]*)$ ]]; then
       local list_value=${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}
       local key="[${line}]"
 
@@ -182,43 +213,12 @@ bosp::yaml::__add_list_values() {
         list_value="${BASH_REMATCH[2]}"
       fi
 
-      if [[ ${open_braces} == 0 ]]; then
-        bosp::yaml::__process_key "${key}"
-      fi
+      bosp::yaml::__process_key "${key}"
 
-      if [[ ${list_value} =~ ^[\ ]*[\{]+[^\}]*$ ]]; then
-        local braces="${list_value//[^\{]}"
-        echo "${list_value} | ${braces} | ${#braces}"
-        let open_braces+=${#braces}
-        collect_lines+=( "${raw_list_value}" )
-      elif [[ ${list_value} =~ ^[^\{]*[\}]+[\ ]*$ ]]; then
-        local braces="${list_value//[^\}]}"
-        echo "${list_value} | ${braces} | ${#braces}"
-        let open_braces-=${#braces}
-        collect_lines+=( "${raw_list_value}" )
-      elif [[ ${open_braces} != 0 ]]; then
-        collect_lines+=( "${raw_list_value}" )
-      fi
-
-      echo ${open_braces}
-
-      if [[ ${open_braces} == 0 ]]; then
-        if [[ ${#collect_lines[@]} > 0 ]]; then
-          local collapsed_lines=$(bosp::__join "," "${collect_lines[@]}")
-          echo ${collapsed_lines}
-
-          if [[ ${collapsed_lines} =~ ^([^:]*):[\ ]*(.*)$ ]]; then
-            list_value="${BASH_REMATCH[2]}"
-          fi
-
-          collect_lines=()
-        fi
-
-        if [[ ${list_value} =~ ^([\[\{])(.*)([\]\}])$ ]]; then
-          bosp::yaml::__add_list_values "${list_value}"
-        else
-          __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${list_value}"
-        fi
+      if [[ ${list_value} =~ ^([\[\{])(.*)([\]\}])$ ]]; then
+        bosp::yaml::__add_list_values "${list_value}"
+      else
+        __BOSP_YAML_ARRAY[${__BOSP_YAML_FULL_KEY}]="${list_value}"
       fi
     fi
 
@@ -374,22 +374,41 @@ bosp::yaml::parse() {
   done
 }
 
+##############################################################
+# Parses the file and add the result to the destination_array
+# Globals:
+#   destination_array
+# Arguments:
+#   string file
+#   string destination_array
+# Returns:
+#   None
+##############################################################
 bosp::yaml::write() {
-  declare -n yaml=${1}
-
+  local file=${1}
+  declare -n yaml=${2}
   local indent=2
 
-  if [[ -n ${2+1} ]]; then
-    indent=${2}
+  if [[ -n ${3+1} ]]; then
+    indent=${3}
   fi
 
   local parent_key=''
+  local children=()
 
-  if [[ -n ${3+1} ]]; then
-    local children=( $(bosp::get_children "${1}" "${3}") )
-    parent_key="${3}:"
+  if [[ -n ${4+1} ]]; then
+    children=( $(bosp::get_children "${2}" "${4}") )
+    parent_key="${4}:"
   else
-    local children=( $(bosp::get_children "${1}") )
+    local dir=${file%/*}
+
+    if [[ ! -d ${dir} ]]; then
+      mkdir -p ${dir}
+    fi
+
+    > ${file}
+
+    children=( $(bosp::get_children "${2}") )
   fi
 
   local child
@@ -421,8 +440,8 @@ bosp::yaml::write() {
       line="${spaces}${child}: ${value}"
     fi
 
-    #echo "${line}"
-    bosp::yaml::write "${1}" "${indent}" "${full_key}"
+    echo "${line}" >> ${file}
+    bosp::yaml::write "${1}" "${2}" "${indent}" "${full_key}"
   done
 }
 
