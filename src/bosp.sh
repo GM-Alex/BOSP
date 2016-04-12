@@ -374,16 +374,18 @@ bosp::yaml::parse() {
   done
 }
 
-##############################################################
-# Parses the file and add the result to the destination_array
+#########################################
+# Writes the parsed array to an yml file
 # Globals:
-#   destination_array
+#   source_array
 # Arguments:
 #   string file
-#   string destination_array
+#   string source_array
+#   int    indent (optional)
+#   string parent_key (optional)
 # Returns:
 #   None
-##############################################################
+#########################################
 bosp::yaml::write() {
   local file=${1}
   declare -n yaml=${2}
